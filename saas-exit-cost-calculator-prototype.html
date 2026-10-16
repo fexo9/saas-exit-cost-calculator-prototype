@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SaaS Exit Cost Calculator — PROTOTYPE</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  .banner { background: #fff3cd; border: 1px solid #e6c200; padding: 0.75rem 1rem; border-radius: 6px; font-weight: 600; }
+  label { display: block; margin: 0.75rem 0 0.25rem; }
+  input, select { width: 100%; padding: 0.5rem; font-size: 1rem; }
+  button { margin-top: 1rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  #summary { margin-top: 1rem; font-weight: 600; }
+  .note { color: #555; font-size: 0.9rem; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="banner">PROTOTYPE — discovery experiment for opportunity <code>subscription-fatigue-wedge</code>. Not a product. Not for sale. It only quantifies subscription cost vs. a one-time alternative.</div>
+<h1>SaaS Exit Cost Calculator</h1>
+<p>See what your subscription really costs once price hikes compound — and what a one-time alternative saves.</p>
+
+<label>Monthly fee per seat ($)</label>
+<input id="monthly" type="number" min="0" step="0.01" value="29">
+<label>Expected annual price-hike (%)</label>
+<input id="hike" type="number" min="0" step="0.1" value="10">
+<label>Years</label>
+<select id="years">
+  <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+</select>
+<label>Seats</label>
+<input id="seats" type="number" min="1" step="1" value="1">
+<label>One-time alternative price ($)</label>
+<input id="oneTime" type="number" min="0" step="0.01" value="24">
+<label>One-time migration / setup cost ($, optional)</label>
+<input id="migrationCost" type="number" min="0" step="0.01" value="0">
+<label>One-time alternative: annual upkeep — hosting, maintenance, updates ($/year, optional)</label>
+<input id="annualUpkeep" type="number" min="0" step="0.01" value="0">
+<label>Subscription annual-billing discount (%, optional)</label>
+<input id="annualDiscountPct" type="number" min="0" max="100" step="0.1" value="0">
+
+<button onclick="render()">Calculate</button>
+
+<table id="results" hidden>
+  <thead><tr><th>Year</th><th>Monthly fee</th><th>Year cost</th><th>Cumulative</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="summary"></div>
+<p class="note">Assumptions, stated plainly: the fee rises once per year by the hike %; seats stay constant; no taxes. The one-time price is a number YOU enter — it is not a quote or a promise. What this does NOT model, and you must estimate separately: switching effort (data export, retraining, downtime), the risk that a one-time tool is abandoned or stops updating, and anything the subscription buys you beyond access (support, integrations, compliance). If the one-time route's migration + upkeep exceed the savings shown, the subscription is the honest winner — this calculator will tell you so.</p>
+
+<script>
+// ---- calcExitCost: pure function, tested by node (see prototype test log) ----
+function calcExitCost(input) {
+  var monthly = Math.max(0, Number(input.monthly) || 0);
+  var hikePct = Math.max(0, Number(input.hikePct) || 0);
+  var years = Math.min(10, Math.max(1, Math.floor(Number(input.years) || 1)));
+  var seats = Math.max(1, Math.floor(Number(input.seats) || 1));
+  var oneTime = Math.max(0, Number(input.oneTime) || 0);
+  // Fairness fix (v1.1): the one-time side must carry its own real costs,
+  // and the subscription side gets its real annual-billing discount.
+  var migrationCost = Math.max(0, Number(input.migrationCost) || 0);
+  var annualUpkeep = Math.max(0, Number(input.annualUpkeep) || 0);
+  var discountPct = Math.min(100, Math.max(0, Number(input.annualDiscountPct) || 0));
+  var perYear = [];
+  var total = 0;
+  for (var y = 1; y <= years; y++) {
+    var fee = monthly * Math.pow(1 + hikePct / 100, y - 1) * (1 - discountPct / 100);
+    var yearCost = fee * 12 * seats;
+    total += yearCost;
+    perYear.push({ year: y, monthlyFee: fee, yearCost: yearCost, cumulative: total });
+  }
+  var oneTimeTotal = oneTime + migrationCost + annualUpkeep * years;
+  return { perYear: perYear, total: total, oneTimeTotal: oneTimeTotal, savings: total - oneTimeTotal };
+}
+function money(n) { return "$" + n.toFixed(2); }
+function render() {
+  var r = calcExitCost({
+    monthly: document.getElementById("monthly").value,
+    hikePct: document.getElementById("hike").value,
+    years: document.getElementById("years").value,
+    seats: document.getElementById("seats").value,
+    oneTime: document.getElementById("oneTime").value,
+    migrationCost: document.getElementById("migrationCost").value,
+    annualUpkeep: document.getElementById("annualUpkeep").value,
+    annualDiscountPct: document.getElementById("annualDiscountPct").value
+  });
+  var rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  r.perYear.forEach(function (row) {
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + row.year + "</td><td>" + money(row.monthlyFee) + "</td><td>" + money(row.yearCost) + "</td><td>" + money(row.cumulative) + "</td>";
+    rows.appendChild(tr);
+  });
+  document.getElementById("results").hidden = false;
+  var oneTime = Math.max(0, Number(document.getElementById("oneTime").value) || 0);
+  var migration = Math.max(0, Number(document.getElementById("migrationCost").value) || 0);
+  var upkeep = Math.max(0, Number(document.getElementById("annualUpkeep").value) || 0);
+  document.getElementById("summary").textContent =
+    "Over " + r.perYear.length + " year(s), the subscription costs " + money(r.total) +
+    " vs " + money(r.oneTimeTotal) + " for the one-time route (purchase " + money(oneTime) +
+    " + migration " + money(migration) + " + upkeep " + money(upkeep) + "/yr) — a difference of " + money(r.savings) + ".";
+}
+if (typeof module !== "undefined") { module.exports = { calcExitCost: calcExitCost }; }
+</script>
+</body>
+</html>
